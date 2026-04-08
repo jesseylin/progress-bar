@@ -13,28 +13,30 @@
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = nixpkgs.legacyPackages.${system};
     in {
-      packages.default = pkgs.buildNpmPackage {
-        pname = "progress-bar";
-        version = "0.0.1";
-        src = ./.;
+      packages.default = with pkgs;
+        buildNpmPackage {
+          pname = "progress-bar";
+          version = "0.0.1";
+          src = ./.;
 
-        # Update with `nix build` then copy the suggested hash, or run
-        # `prefetch-npm-deps package-lock.json`.
-        npmDepsHash = "sha256-iNlZOwsNSAZq6eS2elUDQcxwIputcTzDiiHWnpX3llI=";
+          # Update with `nix build` then copy the suggested hash, or run
+          # `prefetch-npm-deps package-lock.json`.
+          npmDepsHash = "sha256-iNlZOwsNSAZq6eS2elUDQcxwIputcTzDiiHWnpX3llI=";
 
-        # Subpath under which the SPA is mounted on jesseylin.com.
-        BASE_PATH = "/progress-bar";
+          # Subpath under which the SPA is mounted on jesseylin.com.
+          BASE_PATH = "/progress-bar";
 
-        installPhase = ''
-          runHook preInstall
-          mkdir -p $out
-          cp -r build/. $out/
-          runHook postInstall
-        '';
-      };
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out
+            cp -r build/. $out/
+            runHook postInstall
+          '';
+        };
 
-      devShells.default = pkgs.mkShell {
-        packages = [pkgs.nodejs];
-      };
+      devShells.default = with pkgs;
+        mkShell {
+          packages = [nodejs];
+        };
     });
 }
