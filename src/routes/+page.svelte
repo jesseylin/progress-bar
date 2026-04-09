@@ -1,10 +1,52 @@
 <script lang="ts">
 	import { fly } from "svelte/transition";
 
+	// Persisted timer shape. Bump the storage key suffix (`:v1` → `:v2`) on
+	// any breaking change to this type so stale payloads are ignored instead
+	// of deserialising into a broken state.
+	type PersistedTimer = {
+		hh: number;
+		mm: number;
+		ss: number;
+		startedAt: number | null;
+		paused: boolean;
+		elapsedBeforePause: number;
+	};
+	const STORAGE_KEY = "progress-timer:v1";
+
+	// Restore persisted timer state from localStorage (safe: ssr = false).
+	// Validates every field — anything malformed returns null so the
+	// defaults apply, rather than letting `NaN` flow into arithmetic.
+	function loadTimer(): PersistedTimer | null {
+		if (typeof localStorage === "undefined") return null;
+		try {
+			const raw = localStorage.getItem(STORAGE_KEY);
+			if (!raw) return null;
+			const p = JSON.parse(raw);
+			const num = (x: unknown) => typeof x === "number" && Number.isFinite(x);
+			if (
+				!p ||
+				typeof p !== "object" ||
+				!num(p.hh) ||
+				!num(p.mm) ||
+				!num(p.ss) ||
+				!num(p.elapsedBeforePause) ||
+				typeof p.paused !== "boolean" ||
+				!(p.startedAt === null || num(p.startedAt))
+			) {
+				return null;
+			}
+			return p as PersistedTimer;
+		} catch {
+			return null;
+		}
+	}
+	const saved = loadTimer();
+
 	// User-editable duration. Default 1h matches presets[1].
-	let hh = $state(1);
-	let mm = $state(0);
-	let ss = $state(0);
+	let hh = $state(saved?.hh ?? 1);
+	let mm = $state(saved?.mm ?? 0);
+	let ss = $state(saved?.ss ?? 0);
 
 	// UI: whether the collapsible details block (countdown + numeric inputs)
 	// is expanded.
@@ -16,13 +58,13 @@
 	//   been reset.
 	// - `elapsedBeforePause` accumulates the duration of all *completed*
 	//   segments (i.e. time already run before the current pause/resume).
-	// - `now` is a ticking clock, updated every 250ms by the $effect below,
+	// - `now` is a ticking clock, updated via requestAnimationFrame below,
 	//   so that `elapsed` re-derives and the UI re-renders while running.
 	// Total elapsed = elapsedBeforePause + (now - startedAt) while running.
-	let startedAt = $state<number | null>(null);
+	let startedAt = $state<number | null>(saved?.startedAt ?? null);
 	let now = $state(Date.now());
-	let paused = $state(false);
-	let elapsedBeforePause = $state(0);
+	let paused = $state(saved?.paused ?? false);
+	let elapsedBeforePause = $state(saved?.elapsedBeforePause ?? 0);
 
 	// Presets for the pill row. Declared before the $derived that references
 	// it so there's no TDZ surprise.
@@ -70,15 +112,30 @@
 		})(),
 	);
 
-	// Tick `now` while the timer is actively running. The effect re-runs
-	// whenever `running` or `finished` change, tearing down the previous
-	// interval via the returned cleanup — so pausing, finishing, or resetting
-	// all correctly stop the tick. 250ms is fine-grained enough for a smooth
-	// bar but cheap.
+	// Tick `now` via rAF while the timer is actively running. The effect
+	// re-runs whenever `running` or `finished` change, tearing down the
+	// previous loop via the returned cleanup — so pausing, finishing, or
+	// resetting all correctly stop the tick. rAF also auto-pauses when the
+	// tab is hidden.
 	$effect(() => {
 		if (!running || finished) return;
-		const id = setInterval(() => (now = Date.now()), 250);
-		return () => clearInterval(id);
+		let frame: number;
+		const tick = () => {
+			now = Date.now();
+			frame = requestAnimationFrame(tick);
+		};
+		frame = requestAnimationFrame(tick);
+		return () => cancelAnimationFrame(frame);
+	});
+
+	// Persist timer state to localStorage so it survives page closes/reloads.
+	// `now` is intentionally excluded — it's ephemeral and recomputed on load.
+	$effect(() => {
+		if (typeof localStorage === "undefined") return;
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({ hh, mm, ss, startedAt, paused, elapsedBeforePause }),
+		);
 	});
 
 	function fmt(ms: number) {
